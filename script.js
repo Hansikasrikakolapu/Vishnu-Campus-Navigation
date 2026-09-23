@@ -218,6 +218,11 @@ function initializeMap() {
         16
     );
 
+    /*
+       IMPORTANT:
+       This must be a normal OpenStreetMap URL.
+    */
+
     L.tileLayer(
         "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
         {
@@ -521,13 +526,9 @@ function startGPS() {
             },
 
             {
-
                 enableHighAccuracy: true,
-
                 maximumAge: 0,
-
                 timeout: 20000
-
             }
 
         );
@@ -668,8 +669,9 @@ function handlePosition(position) {
 
 
     /*
-       Recalculate walking route whenever
-       a fresh GPS position is received.
+       If the user is already navigating,
+       recalculate the walking route when
+       a fresh GPS position arrives.
     */
 
     if (
@@ -894,7 +896,7 @@ function navigateToLocation(index) {
 
 /* =========================================================
    HAVERSINE DISTANCE
-   Used by Dijkstra graph
+   ADSA SUPPORT FUNCTION
    ========================================================= */
 
 function haversineDistance(
@@ -943,9 +945,9 @@ function haversineDistance(
 
 /* =========================================================
    CREATE CAMPUS GRAPH
-   ADSA CONCEPT:
+   ADSA:
    VERTICES = LOCATIONS
-   EDGES = WALKABLE CONNECTIONS
+   EDGES = CONNECTIONS
    WEIGHT = DISTANCE
    ========================================================= */
 
@@ -963,15 +965,6 @@ function createCampusGraph() {
 
     }
 
-
-    /*
-       Connect nearby campus locations.
-
-       This creates a weighted graph.
-       Each location is a vertex.
-       Each connection is an edge.
-       Distance is the edge weight.
-    */
 
     const MAX_CONNECTION_DISTANCE =
         450;
@@ -1032,7 +1025,7 @@ function createCampusGraph() {
 
 
 /* =========================================================
-   DIJKSTRA'S SHORTEST PATH
+   DIJKSTRA SHORTEST PATH
    ADSA IMPLEMENTATION
    ========================================================= */
 
@@ -1081,8 +1074,8 @@ function dijkstra(
 
 
         /*
-           Find the unvisited vertex
-           having the smallest distance.
+           Select the unvisited vertex
+           with minimum distance.
         */
 
         for (
@@ -1121,7 +1114,7 @@ function dijkstra(
 
 
         /*
-           Relax all neighbouring edges.
+           Relax neighbouring edges.
         */
 
         graph[current].forEach(
@@ -1250,14 +1243,10 @@ function calculateDijkstraPath(
         return null;
     }
 
+
     const graph =
         createCampusGraph();
 
-
-    /*
-       User's GPS is connected to the
-       nearest campus location.
-    */
 
     const startIndex =
         findNearestLocation(
@@ -1295,6 +1284,55 @@ function calculateDijkstraPath(
 
 
 /* =========================================================
+   CHECK VALID ROUTE COORDINATES
+   ========================================================= */
+
+function isValidRouteCoordinate(point) {
+
+    if (
+        !Array.isArray(point) ||
+        point.length < 2
+    ) {
+
+        return false;
+
+    }
+
+    const lat =
+        Number(point[0]);
+
+    const lng =
+        Number(point[1]);
+
+
+    if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng)
+    ) {
+
+        return false;
+
+    }
+
+
+    if (
+        lat < -90 ||
+        lat > 90 ||
+        lng < -180 ||
+        lng > 180
+    ) {
+
+        return false;
+
+    }
+
+
+    return true;
+
+}
+
+
+/* =========================================================
    WALKING ROUTE
    ========================================================= */
 
@@ -1315,6 +1353,7 @@ async function calculateRoute(
     if (!destination) return;
 
     if (isRouting) return;
+
 
     isRouting = true;
 
@@ -1338,9 +1377,17 @@ async function calculateRoute(
         destination.lng;
 
 
-    /* =====================================================
+    /*
+       =====================================================
        DIJKSTRA ADSA
-       ===================================================== */
+       =====================================================
+
+       Dijkstra is executed as the project's
+       graph shortest-path algorithm.
+
+       The result is kept internally for
+       ADSA implementation and demonstration.
+    */
 
     const dijkstraResult =
         calculateDijkstraPath(
@@ -1348,24 +1395,20 @@ async function calculateRoute(
         );
 
 
-    /*
-       Dijkstra is kept as the ADSA shortest-path
-       calculation inside the application.
-
-       The actual geographic walking line is obtained
-       from the pedestrian routing service below.
-    */
-
-
     console.log(
-        "Dijkstra result:",
+        "ADSA Dijkstra shortest path:",
         dijkstraResult
     );
 
 
-    /* =====================================================
+    /*
+       =====================================================
        PEDESTRIAN ROUTING
-       ===================================================== */
+       =====================================================
+
+       Valhalla is used only to obtain the
+       real pedestrian road/path geometry.
+    */
 
     const requestBody = {
 
@@ -1432,7 +1475,8 @@ async function calculateRoute(
         if (!response.ok) {
 
             throw new Error(
-                "Walking routing server error"
+                "Walking routing server error: " +
+                response.status
             );
 
         }
@@ -1459,9 +1503,20 @@ async function calculateRoute(
             data.trip.legs[0];
 
 
-        /* =================================================
-           DECODE VALHALLA POLYLINE
-           ================================================= */
+        if (!leg.shape) {
+
+            throw new Error(
+                "Walking route geometry not found"
+            );
+
+        }
+
+
+        /*
+           =================================================
+           DECODE VALHALLA POLYLINE6
+           =================================================
+        */
 
         const coordinates =
             decodePolyline6(
@@ -1469,16 +1524,62 @@ async function calculateRoute(
             );
 
 
+        /*
+           IMPORTANT SAFETY CHECK
+
+           If invalid coordinates are received,
+           do NOT call fitBounds().
+           This prevents the map from zooming
+           to the entire world.
+        */
+
+        if (
+            !coordinates ||
+            coordinates.length < 2
+        ) {
+
+            throw new Error(
+                "Invalid walking route coordinates"
+            );
+
+        }
+
+
+        const validCoordinates =
+            coordinates.filter(
+                isValidRouteCoordinate
+            );
+
+
+        if (
+            validCoordinates.length < 2
+        ) {
+
+            throw new Error(
+                "Walking route contains invalid coordinates"
+            );
+
+        }
+
+
+        /*
+           =================================================
+           CLEAR OLD ROUTE
+           =================================================
+        */
+
         clearRouteLayers();
 
 
-        /* =================================================
+        /*
+           =================================================
            MAIN WALKING ROUTE
-           ================================================= */
+           =================================================
+        */
 
         routeLine =
             L.polyline(
-                coordinates,
+                validCoordinates,
                 {
 
                     color: "#2563eb",
@@ -1496,9 +1597,11 @@ async function calculateRoute(
             .addTo(map);
 
 
-        /* =================================================
-           CONNECT GPS TO ROUTE
-           ================================================= */
+        /*
+           =================================================
+           CONNECT EXACT GPS POSITION TO WALKING ROUTE
+           =================================================
+        */
 
         const exactUserPoint =
             L.latLng(
@@ -1509,8 +1612,8 @@ async function calculateRoute(
 
         const roadStartPoint =
             L.latLng(
-                coordinates[0][0],
-                coordinates[0][1]
+                validCoordinates[0][0],
+                validCoordinates[0][1]
             );
 
 
@@ -1540,9 +1643,11 @@ async function calculateRoute(
             .addTo(map);
 
 
-        /* =================================================
+        /*
+           =================================================
            DESTINATION MARKER
-           ================================================= */
+           =================================================
+        */
 
         if (destinationMarker) {
 
@@ -1566,12 +1671,27 @@ async function calculateRoute(
             );
 
 
-        /* =================================================
+        /*
+           =================================================
            DISTANCE
-           ================================================= */
+           =================================================
+        */
 
         const distanceKm =
-            data.trip.summary.length;
+            Number(
+                data.trip.summary.length
+            );
+
+
+        if (
+            !Number.isFinite(distanceKm)
+        ) {
+
+            throw new Error(
+                "Invalid route distance"
+            );
+
+        }
 
 
         const distanceMeters =
@@ -1601,13 +1721,24 @@ async function calculateRoute(
         }
 
 
-        /* =================================================
+        /*
+           =================================================
            WALKING TIME
-           ================================================= */
+           =================================================
+        */
+
+        const durationSeconds =
+            Number(
+                data.trip.summary.time
+            );
+
 
         const durationMinutes =
-            Math.ceil(
-                data.trip.summary.time / 60
+            Math.max(
+                1,
+                Math.ceil(
+                    durationSeconds / 60
+                )
             );
 
 
@@ -1643,13 +1774,15 @@ async function calculateRoute(
         }
 
 
-        /* =================================================
+        /*
+           =================================================
            ROUTE PANEL
-           ================================================= */
+           =================================================
+        */
 
         updateRoutePanel(
             destination,
-            "🚶 On Foot • Route starts from your GPS position"
+            "🚶 On Foot • Walking route from your GPS position"
         );
 
 
@@ -1681,9 +1814,11 @@ async function calculateRoute(
         }
 
 
-        /* =================================================
+        /*
+           =================================================
            MAP VIEW
-           ================================================= */
+           =================================================
+        */
 
         const bounds =
             L.latLngBounds([]);
@@ -1705,7 +1840,7 @@ async function calculateRoute(
         );
 
 
-        coordinates.forEach(
+        validCoordinates.forEach(
             function (point) {
 
                 bounds.extend(
@@ -1716,17 +1851,27 @@ async function calculateRoute(
         );
 
 
-        map.fitBounds(
-            bounds,
-            {
+        /*
+           Fit only to valid route coordinates.
+        */
 
-                padding: [
-                    80,
-                    80
-                ]
+        if (
+            bounds.isValid()
+        ) {
 
-            }
-        );
+            map.fitBounds(
+                bounds,
+                {
+
+                    padding: [
+                        80,
+                        80
+                    ]
+
+                }
+            );
+
+        }
 
 
         const panel =
@@ -1757,14 +1902,45 @@ async function calculateRoute(
 
 
         /*
-           If external walking routing fails,
-           still keep the Dijkstra ADSA result.
+           Remove any invalid/old route
+           instead of showing a wrong world map.
         */
+
+        clearRouteLayers();
+
 
         updateRoutePanel(
             destination,
-            "🚶 On Foot • Route unavailable"
+            "🚶 On Foot • Unable to find walking route"
         );
+
+
+        const distanceElement =
+            document.getElementById(
+                "routeDistance"
+            );
+
+
+        const timeElement =
+            document.getElementById(
+                "routeTime"
+            );
+
+
+        if (distanceElement) {
+
+            distanceElement.textContent =
+                "--";
+
+        }
+
+
+        if (timeElement) {
+
+            timeElement.textContent =
+                "--";
+
+        }
 
 
         isRouting = false;
@@ -1795,12 +1971,16 @@ function decodePolyline6(
         index < encoded.length
     ) {
 
-        let result = 1;
+        let result = 0;
 
         let shift = 0;
 
         let byte;
 
+
+        /*
+           Decode latitude
+        */
 
         do {
 
@@ -1810,9 +1990,11 @@ function decodePolyline6(
                 ) -
                 63;
 
-            result +=
+
+            result |=
                 (byte & 0x1f) <<
                 shift;
+
 
             shift += 5;
 
@@ -1830,10 +2012,15 @@ function decodePolyline6(
                 : (result >> 1);
 
 
-        lat += deltaLat;
+        lat +=
+            deltaLat;
 
 
-        result = 1;
+        /*
+           Decode longitude
+        */
+
+        result = 0;
 
         shift = 0;
 
@@ -1846,9 +2033,11 @@ function decodePolyline6(
                 ) -
                 63;
 
-            result +=
+
+            result |=
                 (byte & 0x1f) <<
                 shift;
+
 
             shift += 5;
 
@@ -1866,13 +2055,18 @@ function decodePolyline6(
                 : (result >> 1);
 
 
-        lng += deltaLng;
+        lng +=
+            deltaLng;
 
+
+        /*
+           Valhalla uses polyline precision 6.
+        */
 
         coordinates.push(
             [
-                lat / 100000,
-                lng / 100000
+                lat / 1000000,
+                lng / 1000000
             ]
         );
 
