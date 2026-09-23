@@ -1,6 +1,6 @@
 /* =========================================================
    VISHNU SOCIETY NAVIGATION
-   GPS + OSRM Navigation + ADSA GRAPH + DIJKSTRA
+   GPS + WALKING NAVIGATION + ADSA GRAPH + DIJKSTRA
    ========================================================= */
 
 
@@ -28,7 +28,7 @@ let isRouting = false;
 
 
 /* =========================================================
-   LOCATIONS
+   CAMPUS LOCATIONS
    These locations are the VERTICES of our graph.
    ========================================================= */
 
@@ -183,31 +183,16 @@ const locations = [
 
 /* =========================================================
    =========================================================
-   ADSA GRAPH IMPLEMENTATION
+   ADSA GRAPH
    =========================================================
    =========================================================
 
-   Graph representation:
+   Vertex = Campus location
+   Edge   = Connection between locations
+   Weight = Distance between locations
 
-   Vertex  = Campus location
-   Edge    = Connection between two locations
-   Weight  = Distance between locations
-
-   We use an ADJACENCY LIST representation.
-
-   Example:
-
-   SVECW
-      |
-      | distance
-      |
-   Central Library
-      |
-      |
-     VIT
-
-   Dijkstra's algorithm is then used to find the
-   minimum-distance path.
+   Representation:
+   ADJACENCY LIST
    */
 
 
@@ -219,26 +204,14 @@ class Graph {
 
     constructor() {
 
-        /*
-         * Adjacency list.
-         *
-         * Example:
-         *
-         * graph.get(0) =
-         * [
-         *   { node: 1, weight: 150 },
-         *   { node: 2, weight: 250 }
-         * ]
-         */
-
         this.adjacencyList = new Map();
 
     }
 
 
-    /* -----------------------------------------------------
-       Add a vertex
-       ----------------------------------------------------- */
+    /* =====================================================
+       ADD VERTEX
+       ===================================================== */
 
     addVertex(vertex) {
 
@@ -254,9 +227,9 @@ class Graph {
     }
 
 
-    /* -----------------------------------------------------
-       Add an UNDIRECTED weighted edge
-       ----------------------------------------------------- */
+    /* =====================================================
+       ADD UNDIRECTED WEIGHTED EDGE
+       ===================================================== */
 
     addEdge(vertex1, vertex2, weight) {
 
@@ -267,24 +240,28 @@ class Graph {
         this.adjacencyList
             .get(vertex1)
             .push({
+
                 node: vertex2,
                 weight: weight
+
             });
 
 
         this.adjacencyList
             .get(vertex2)
             .push({
+
                 node: vertex1,
                 weight: weight
+
             });
 
     }
 
 
-    /* -----------------------------------------------------
-       Dijkstra's Shortest Path Algorithm
-       ----------------------------------------------------- */
+    /* =====================================================
+       DIJKSTRA'S SHORTEST PATH ALGORITHM
+       ===================================================== */
 
     dijkstra(start, target) {
 
@@ -294,12 +271,9 @@ class Graph {
         const visited = new Set();
 
 
-        /*
-         * Initialize distances.
-         *
-         * Distance to source = 0
-         * Distance to every other vertex = Infinity
-         */
+        /* -----------------------------------------------
+           INITIALIZATION
+           ----------------------------------------------- */
 
         for (
             const vertex of this.adjacencyList.keys()
@@ -314,16 +288,9 @@ class Graph {
         distances[start] = 0;
 
 
-        /*
-         * Priority Queue implemented using an array.
-         *
-         * Each element:
-         *
-         * {
-         *     node: vertex,
-         *     distance: current shortest distance
-         * }
-         */
+        /* -----------------------------------------------
+           PRIORITY QUEUE
+           ----------------------------------------------- */
 
         const priorityQueue = [
 
@@ -335,17 +302,25 @@ class Graph {
         ];
 
 
-        while (priorityQueue.length > 0) {
+        /* -----------------------------------------------
+           MAIN DIJKSTRA LOOP
+           ----------------------------------------------- */
 
+        while (
+            priorityQueue.length > 0
+        ) {
 
             /*
-             * Find the vertex with the smallest distance.
+             * Smallest distance first.
              */
 
             priorityQueue.sort(
                 function (a, b) {
 
-                    return a.distance - b.distance;
+                    return (
+                        a.distance -
+                        b.distance
+                    );
 
                 }
             );
@@ -372,8 +347,7 @@ class Graph {
 
 
             /*
-             * If destination is reached,
-             * shortest distance is finalized.
+             * Destination reached.
              */
 
             if (
@@ -386,7 +360,7 @@ class Graph {
 
 
             /*
-             * Examine all neighboring vertices.
+             * Get all neighboring vertices.
              */
 
             const neighbors =
@@ -407,17 +381,14 @@ class Graph {
                 }
 
 
+                /*
+                 * Relaxation.
+                 */
+
                 const newDistance =
                     distances[currentNode] +
                     edge.weight;
 
-
-                /*
-                 * Relaxation step.
-                 *
-                 * If new path is shorter,
-                 * update distance and predecessor.
-                 */
 
                 if (
                     newDistance <
@@ -447,9 +418,9 @@ class Graph {
         }
 
 
-        /*
-         * Reconstruct shortest path.
-         */
+        /* -----------------------------------------------
+           RECONSTRUCT SHORTEST PATH
+           ----------------------------------------------- */
 
         const path = [];
 
@@ -472,8 +443,7 @@ class Graph {
 
 
         /*
-         * If the source is not connected
-         * to the destination.
+         * No valid path.
          */
 
         if (
@@ -508,8 +478,7 @@ class Graph {
 
 /* =========================================================
    HAVERSINE DISTANCE
-   Calculates geographical distance between
-   two latitude/longitude coordinates.
+   Calculates distance between two coordinates.
    ========================================================= */
 
 function calculateDistance(
@@ -521,25 +490,37 @@ function calculateDistance(
 
     const R = 6371000;
 
+
     const lat1Rad =
-        lat1 * Math.PI / 180;
+        lat1 *
+        Math.PI /
+        180;
+
 
     const lat2Rad =
-        lat2 * Math.PI / 180;
+        lat2 *
+        Math.PI /
+        180;
 
 
     const deltaLat =
         (lat2 - lat1) *
-        Math.PI / 180;
+        Math.PI /
+        180;
+
 
     const deltaLon =
         (lon2 - lon1) *
-        Math.PI / 180;
+        Math.PI /
+        180;
 
 
     const a =
+
         Math.sin(deltaLat / 2) *
-        Math.sin(deltaLat / 2) +
+        Math.sin(deltaLat / 2)
+
+        +
 
         Math.cos(lat1Rad) *
         Math.cos(lat2Rad) *
@@ -549,10 +530,14 @@ function calculateDistance(
 
 
     const c =
+
         2 *
         Math.atan2(
+
             Math.sqrt(a),
+
             Math.sqrt(1 - a)
+
         );
 
 
@@ -572,7 +557,7 @@ function createCampusGraph() {
 
 
     /*
-     * Add every campus location as a vertex.
+     * Add all locations as vertices.
      */
 
     for (
@@ -587,12 +572,8 @@ function createCampusGraph() {
 
 
     /*
-     * Connect every location to its
-     * nearest 3 locations.
-     *
-     * This creates a realistic weighted
-     * campus graph without manually entering
-     * every road.
+     * Connect each location with its
+     * nearest three locations.
      */
 
     const numberOfConnections = 3;
@@ -644,7 +625,7 @@ function createCampusGraph() {
 
 
         /*
-         * Sort by distance.
+         * Sort locations by distance.
          */
 
         nearest.sort(
@@ -660,7 +641,7 @@ function createCampusGraph() {
 
 
         /*
-         * Add nearest 3 edges.
+         * Add nearest locations as edges.
          */
 
         for (
@@ -693,7 +674,7 @@ function createCampusGraph() {
 
 
 /* =========================================================
-   CREATE GRAPH
+   BUILD GRAPH
    ========================================================= */
 
 const campusGraph =
@@ -701,7 +682,7 @@ const campusGraph =
 
 
 /* =========================================================
-   FIND NEAREST GRAPH VERTEX
+   FIND NEAREST CAMPUS VERTEX
    ========================================================= */
 
 function findNearestLocation(
@@ -755,7 +736,7 @@ function findNearestLocation(
 
 
 /* =========================================================
-   RUN DIJKSTRA FOR CURRENT NAVIGATION
+   RUN DIJKSTRA
    ========================================================= */
 
 function runDijkstra(
@@ -770,10 +751,8 @@ function runDijkstra(
 
 
     /*
-     * The user's GPS position is not necessarily
-     * one of our campus vertices.
-     *
-     * Therefore we find the nearest campus vertex.
+     * Convert user's GPS location into
+     * the nearest graph vertex.
      */
 
     const startVertex =
@@ -801,7 +780,7 @@ function runDijkstra(
 
 
     /*
-     * Run Dijkstra.
+     * Execute Dijkstra.
      */
 
     const result =
@@ -815,8 +794,7 @@ function runDijkstra(
 
 
     /*
-     * Console output is useful for
-     * demonstrating the ADSA implementation.
+     * ADSA demonstration output.
      */
 
     console.log(
@@ -836,31 +814,45 @@ function runDijkstra(
     );
 
 
-    console.log(
-        "Shortest Distance:",
-        result.distance.toFixed(2),
-        "meters"
-    );
+    if (
+        result.path.length > 0
+    ) {
+
+        console.log(
+
+            "Shortest Distance:",
+
+            result.distance.toFixed(2),
+
+            "meters"
+
+        );
 
 
-    console.log(
-        "Shortest Path:"
-    );
+        console.log(
 
+            "Shortest Path:",
 
-    console.log(
+            result.path
+                .map(
+                    function (index) {
 
-        result.path
-            .map(
-                function (index) {
+                        return locations[index].name;
 
-                    return locations[index].name;
+                    }
+                )
+                .join(" → ")
 
-                }
-            )
-            .join(" → ")
+        );
 
-    );
+    }
+    else {
+
+        console.log(
+            "No path found."
+        );
+
+    }
 
 
     console.log(
@@ -918,17 +910,18 @@ document.addEventListener(
 
 
 /* =========================================================
-   MAP
+   MAP INITIALIZATION
    ========================================================= */
 
 function initializeMap() {
 
     map =
-        L.map("map", {
-
-            zoomControl: true
-
-        })
+        L.map(
+            "map",
+            {
+                zoomControl: true
+            }
+        )
         .setView(
 
             [
@@ -1258,9 +1251,7 @@ function showDestination(index) {
         18,
 
         {
-
             animate: true
-
         }
 
     );
@@ -1345,7 +1336,7 @@ function startGPS() {
 
 
 /* =========================================================
-   HANDLE GPS
+   HANDLE GPS POSITION
    ========================================================= */
 
 function handlePosition(
@@ -1385,9 +1376,9 @@ function handlePosition(
         );
 
 
-    /* -----------------------------------------------------
-       EXACT USER DOT
-       ----------------------------------------------------- */
+    /* =====================================================
+       USER LOCATION MARKER
+       ===================================================== */
 
     if (!userMarker) {
 
@@ -1438,9 +1429,9 @@ function handlePosition(
     }
 
 
-    /* -----------------------------------------------------
+    /* =====================================================
        ACCURACY CIRCLE
-       ----------------------------------------------------- */
+       ===================================================== */
 
     if (!accuracyCircle) {
 
@@ -1481,9 +1472,9 @@ function handlePosition(
     }
 
 
-    /* -----------------------------------------------------
+    /* =====================================================
        GPS STATUS
-       ----------------------------------------------------- */
+       ===================================================== */
 
     updateGPSStatus(
 
@@ -1508,9 +1499,9 @@ function handlePosition(
     }
 
 
-    /* -----------------------------------------------------
-       UPDATE ACTIVE ROUTE
-       ----------------------------------------------------- */
+    /* =====================================================
+       UPDATE WALKING ROUTE
+       ===================================================== */
 
     if (
         selectedDestination &&
@@ -1600,7 +1591,7 @@ function updateGPSStatus(
 
 
 /* =========================================================
-   MY LOCATION BUTTON
+   LOCATE ME
    ========================================================= */
 
 function locateMe() {
@@ -1645,9 +1636,7 @@ function locateMe() {
                 19,
 
                 {
-
                     animate: true
-
                 }
 
             );
@@ -1674,7 +1663,6 @@ function locateMe() {
 
         },
 
-
         function (error) {
 
             handleGPSError(
@@ -1691,7 +1679,6 @@ function locateMe() {
             );
 
         },
-
 
         {
 
@@ -1774,7 +1761,7 @@ function navigateToLocation(
 
 
 /* =========================================================
-   CALCULATE ROUTE
+   CALCULATE WALKING ROUTE
    ========================================================= */
 
 async function calculateRoute(
@@ -1813,20 +1800,14 @@ async function calculateRoute(
 
         destination,
 
-        "Finding shortest path..."
+        "Finding walking route..."
 
     );
 
 
-    /*
-     * =====================================================
-     * ADSA PART
-     * =====================================================
-     *
-     * First run Dijkstra on our campus graph.
-     *
-     * This is the actual ADSA graph algorithm.
-     */
+    /* =====================================================
+       ADSA - DIJKSTRA
+       ===================================================== */
 
     const dijkstraResult =
         runDijkstra(
@@ -1834,28 +1815,19 @@ async function calculateRoute(
         );
 
 
-    /*
-     * Display Dijkstra information in console.
-     *
-     * This does not interfere with the
-     * actual OSRM road route.
-     */
-
-    if (
-        dijkstraResult &&
-        dijkstraResult.path.length > 0
-    ) {
-
-        console.log(
-            "ADSA shortest path successfully calculated."
-        );
-
-    }
-
-
     /* =====================================================
-       REAL GPS + OSRM ROUTING
-       ===================================================== */
+       WALKING ROUTING
+       =====================================================
+
+       routed-foot is the pedestrian routing server.
+
+       The profile in the URL is "driving" because this
+       particular routed-foot server is configured with
+       its pedestrian routing profile behind that endpoint.
+
+       This is NOT the same as using the normal
+       router.project-osrm.org driving server.
+       */
 
     const startLat =
         currentPosition.lat;
@@ -1873,16 +1845,9 @@ async function calculateRoute(
         destination.lng;
 
 
-    /*
-     * OSRM snaps GPS position to the nearest
-     * routable road.
-     *
-     * Exact GPS point is still displayed.
-     */
-
     const url =
 
-        "https://router.project-osrm.org/route/v1/driving/" +
+        "https://routing.openstreetmap.de/routed-foot/route/v1/driving/" +
 
         startLng +
         "," +
@@ -1908,7 +1873,7 @@ async function calculateRoute(
         if (!response.ok) {
 
             throw new Error(
-                "Routing server error"
+                "Walking routing server error"
             );
 
         }
@@ -1929,7 +1894,7 @@ async function calculateRoute(
         ) {
 
             throw new Error(
-                "No route found"
+                "No walking route found"
             );
 
         }
@@ -1965,7 +1930,7 @@ async function calculateRoute(
 
 
         /* =================================================
-           MAIN ROAD ROUTE
+           WALKING ROUTE LINE
            ================================================= */
 
         routeLine =
@@ -2005,7 +1970,7 @@ async function calculateRoute(
             );
 
 
-        const roadStartPoint =
+        const routeStartPoint =
             L.latLng(
 
                 coordinates[0][0],
@@ -2016,7 +1981,7 @@ async function calculateRoute(
 
 
         /* =================================================
-           CONNECT GPS TO ROAD
+           CONNECT GPS POINT TO ROUTE
            ================================================= */
 
         connectorLine =
@@ -2026,7 +1991,7 @@ async function calculateRoute(
 
                     exactUserPoint,
 
-                    roadStartPoint
+                    routeStartPoint
 
                 ],
 
@@ -2049,7 +2014,7 @@ async function calculateRoute(
 
 
         /* =================================================
-           DESTINATION
+           DESTINATION MARKER
            ================================================= */
 
         if (destinationMarker) {
@@ -2082,7 +2047,7 @@ async function calculateRoute(
 
 
         /* =================================================
-           DISTANCE
+           REMAINING DISTANCE
            ================================================= */
 
         const distanceMeters =
@@ -2096,7 +2061,9 @@ async function calculateRoute(
         let distanceText;
 
 
-        if (distanceKm < 1) {
+        if (
+            distanceKm < 1
+        ) {
 
             distanceText =
                 Math.round(
@@ -2115,7 +2082,12 @@ async function calculateRoute(
 
 
         /* =================================================
-           TIME
+           WALKING TIME
+           =================================================
+
+           The foot-routing server provides duration.
+
+           It is an ESTIMATED walking duration.
            ================================================= */
 
         const durationMinutes =
@@ -2127,7 +2099,9 @@ async function calculateRoute(
         let timeText;
 
 
-        if (durationMinutes < 60) {
+        if (
+            durationMinutes < 60
+        ) {
 
             timeText =
                 durationMinutes +
@@ -2157,17 +2131,12 @@ async function calculateRoute(
 
 
         /* =================================================
-           ROUTE PANEL
+           ROUTE STATUS
            ================================================= */
 
         let statusText =
-            "Route starts from your exact GPS position";
+            "🚶 On Foot • Route starts from your GPS position";
 
-
-        /*
-         * Add ADSA information to the status
-         * without changing your existing UI structure.
-         */
 
         if (
             dijkstraResult &&
@@ -2188,6 +2157,10 @@ async function calculateRoute(
 
         );
 
+
+        /* =================================================
+           DISTANCE UI
+           ================================================= */
 
         const distanceElement =
             document.getElementById(
@@ -2306,18 +2279,41 @@ async function calculateRoute(
     catch (error) {
 
         console.error(
-            "ROUTE ERROR:",
+            "WALKING ROUTE ERROR:",
             error
         );
 
 
-        updateRoutePanel(
+        /*
+         * Dijkstra still works even if
+         * the external walking router fails.
+         */
 
-            destination,
+        if (
+            dijkstraResult &&
+            dijkstraResult.path.length > 0
+        ) {
 
-            "Unable to calculate route"
+            updateRoutePanel(
 
-        );
+                destination,
+
+                "Walking road route unavailable • Dijkstra shortest campus path calculated"
+
+            );
+
+        }
+        else {
+
+            updateRoutePanel(
+
+                destination,
+
+                "Unable to calculate walking route"
+
+            );
+
+        }
 
 
         isRouting = false;
@@ -2520,15 +2516,12 @@ function startNavigationFromHero() {
 /* =========================================================
    ADSA DEBUG FUNCTION
    =========================================================
-   
-   You can call this from the browser console:
 
-   showGraph();
+   Open browser console and type:
 
-   It prints all graph vertices and edges.
+       showGraph();
 
-   This is useful when demonstrating your
-   ADSA implementation to your professor.
+   It will display the adjacency-list graph.
    ========================================================= */
 
 function showGraph() {
