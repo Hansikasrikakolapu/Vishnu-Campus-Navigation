@@ -3,6 +3,11 @@
    GPS + ON FOOT NAVIGATION + DIJKSTRA ADSA
    ========================================================= */
 
+
+/* =========================================================
+   GLOBAL VARIABLES
+   ========================================================= */
+
 let map;
 
 let userMarker = null;
@@ -20,6 +25,39 @@ let gpsWatchId = null;
 
 let locationReady = false;
 let isRouting = false;
+
+/*
+   Prevent unnecessary route recalculation.
+
+   The route will be recalculated only when:
+   - destination changes
+   - first route is requested
+   - user moves more than this distance
+*/
+const REROUTE_DISTANCE_METERS = 15;
+
+/*
+   Ignore extremely inaccurate GPS positions.
+   This does NOT mean GPS needs exactly 50 m accuracy.
+   It simply prevents obviously poor readings from
+   constantly changing the route.
+*/
+const MAX_ACCEPTABLE_GPS_ACCURACY = 100;
+
+
+/*
+   Used to identify the latest route request.
+
+   If an older Valhalla response arrives after a newer
+   request, the old response will be ignored.
+*/
+let routeRequestId = 0;
+
+
+/*
+   Position from which the current route was calculated.
+*/
+let lastRoutedPosition = null;
 
 
 /* =========================================================
@@ -217,11 +255,6 @@ function initializeMap() {
         [16.5672, 81.5225],
         16
     );
-
-    /*
-       IMPORTANT:
-       This must be a normal OpenStreetMap URL.
-    */
 
     L.tileLayer(
         "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -527,8 +560,14 @@ function startGPS() {
 
             {
                 enableHighAccuracy: true,
+
+                /*
+                   Always ask for a recent GPS reading.
+                */
                 maximumAge: 0,
+
                 timeout: 20000
+
             }
 
         );
@@ -552,10 +591,54 @@ function handlePosition(position) {
         position.coords.accuracy;
 
 
+    /*
+       Reject obviously poor GPS readings.
+
+       Example:
+       If GPS suddenly reports ±500 m accuracy,
+       don't use that reading to change the route.
+    */
+
+    if (
+        !Number.isFinite(lat) ||
+        !Number.isFinite(lng) ||
+        !Number.isFinite(accuracy)
+    ) {
+
+        return;
+
+    }
+
+
+    if (
+        accuracy > MAX_ACCEPTABLE_GPS_ACCURACY
+    ) {
+
+        updateGPSStatus(
+            "GPS signal weak • accuracy ± " +
+            Math.round(accuracy) +
+            " m"
+        );
+
+        /*
+           We still display the GPS position,
+           but we don't use poor readings to
+           trigger a new route.
+        */
+
+    }
+
+
+    const previousPosition =
+        currentPosition;
+
+
     currentPosition = {
 
         lat: lat,
+
         lng: lng,
+
         accuracy: accuracy
 
     };
@@ -570,7 +653,9 @@ function handlePosition(position) {
         );
 
 
-    /* USER LOCATION MARKER */
+    /* =====================================================
+       USER LOCATION MARKER
+       ===================================================== */
 
     if (!userMarker) {
 
@@ -611,7 +696,9 @@ function handlePosition(position) {
     }
 
 
-    /* ACCURACY CIRCLE */
+    /* =====================================================
+       GPS ACCURACY CIRCLE
+       ===================================================== */
 
     if (!accuracyCircle) {
 
@@ -668,20 +755,72 @@ function handlePosition(position) {
     }
 
 
-    /*
-       If the user is already navigating,
-       recalculate the walking route when
-       a fresh GPS position arrives.
-    */
+    /* =====================================================
+       SMART REROUTING
+       ===================================================== */
 
     if (
         selectedDestination &&
         !isRouting
     ) {
 
-        calculateRoute(
-            selectedDestination
-        );
+        /*
+           Always calculate the first route.
+        */
+
+        if (!lastRoutedPosition) {
+
+            calculateRoute(
+                selectedDestination
+            );
+
+            return;
+
+        }
+
+
+        /*
+           Calculate how far the user has moved
+           from the position used for the previous route.
+        */
+
+        const movement =
+            haversineDistance(
+                lastRoutedPosition.lat,
+                lastRoutedPosition.lng,
+                lat,
+                lng
+            );
+
+
+        /*
+           Only reroute when movement is significant.
+        */
+
+        if (
+            movement >=
+            REROUTE_DISTANCE_METERS
+        ) {
+
+            calculateRoute(
+                selectedDestination
+            );
+
+        }
+
+    }
+
+
+    /*
+       Prevent unused variable warnings
+       and keep previous position available
+       for future improvements.
+    */
+
+    if (previousPosition) {
+
+        // Previous GPS position is intentionally retained
+        // for movement comparison if needed.
 
     }
 
@@ -802,6 +941,14 @@ function locateMe() {
 
             if (selectedDestination) {
 
+                /*
+                   Force a new route when
+                   the user explicitly presses
+                   My Location.
+                */
+
+                lastRoutedPosition = null;
+
                 calculateRoute(
                     selectedDestination
                 );
@@ -856,12 +1003,27 @@ function navigateToLocation(index) {
         return;
     }
 
+
+    /*
+       Store selected destination.
+    */
+
     selectedDestination =
         destination;
+
+
+    /*
+       New destination means a completely
+       new route is required.
+    */
+
+    lastRoutedPosition = null;
+
 
     showDestination(
         index
     );
+
 
     const mapSection =
         document.getElementById(
@@ -877,6 +1039,7 @@ function navigateToLocation(index) {
         );
 
     }
+
 
     if (currentPosition) {
 
@@ -908,13 +1071,16 @@ function haversineDistance(
 
     const R = 6371000;
 
+
     const dLat =
         (lat2 - lat1) *
         Math.PI / 180;
 
+
     const dLng =
         (lng2 - lng1) *
         Math.PI / 180;
+
 
     const a =
         Math.sin(dLat / 2) *
@@ -931,12 +1097,14 @@ function haversineDistance(
         Math.sin(dLng / 2) *
         Math.sin(dLng / 2);
 
+
     const c =
         2 *
         Math.atan2(
             Math.sqrt(a),
             Math.sqrt(1 - a)
         );
+
 
     return R * c;
 
@@ -955,6 +1123,12 @@ function createCampusGraph() {
 
     const graph = [];
 
+
+    /*
+       Create an empty adjacency list
+       for every campus location.
+    */
+
     for (
         let i = 0;
         i < locations.length;
@@ -965,6 +1139,15 @@ function createCampusGraph() {
 
     }
 
+
+    /*
+       Two campus locations are connected
+       if their geographical distance
+       is <= 450 metres.
+
+       The edge weight is the Haversine
+       distance between them.
+    */
 
     const MAX_CONNECTION_DISTANCE =
         450;
@@ -996,6 +1179,10 @@ function createCampusGraph() {
                 MAX_CONNECTION_DISTANCE
             ) {
 
+                /*
+                   Add i -> j
+                */
+
                 graph[i].push({
 
                     node: j,
@@ -1003,6 +1190,14 @@ function createCampusGraph() {
                     weight: distance
 
                 });
+
+
+                /*
+                   Add j -> i
+
+                   Therefore the campus graph
+                   is UNDIRECTED.
+                */
 
                 graph[j].push({
 
@@ -1042,12 +1237,14 @@ function dijkstra(
             Infinity
         );
 
+
     const previous =
         new Array(
             graph.length
         ).fill(
             null
         );
+
 
     const visited =
         new Array(
@@ -1057,8 +1254,16 @@ function dijkstra(
         );
 
 
+    /*
+       Distance from start to itself = 0.
+    */
+
     distances[start] = 0;
 
+
+    /*
+       Repeat up to V times.
+    */
 
     for (
         let count = 0;
@@ -1074,8 +1279,8 @@ function dijkstra(
 
 
         /*
-           Select the unvisited vertex
-           with minimum distance.
+           Find the unvisited vertex
+           having the smallest tentative distance.
         */
 
         for (
@@ -1100,13 +1305,29 @@ function dijkstra(
         }
 
 
-        if (current === -1) {
+        /*
+           No reachable vertex remains.
+        */
+
+        if (
+            current === -1
+        ) {
+
             break;
+
         }
 
 
-        if (current === target) {
+        /*
+           Target reached.
+        */
+
+        if (
+            current === target
+        ) {
+
             break;
+
         }
 
 
@@ -1114,7 +1335,7 @@ function dijkstra(
 
 
         /*
-           Relax neighbouring edges.
+           Relax every neighbouring edge.
         */
 
         graph[current].forEach(
@@ -1133,6 +1354,7 @@ function dijkstra(
                     distances[edge.node] =
                         newDistance;
 
+
                     previous[edge.node] =
                         current;
 
@@ -1145,10 +1367,32 @@ function dijkstra(
 
 
     /*
-       Reconstruct shortest path.
+       Reconstruct the path
+       from target back to start.
     */
 
     const path = [];
+
+
+    /*
+       If target is unreachable,
+       return an empty path.
+    */
+
+    if (
+        distances[target] === Infinity
+    ) {
+
+        return {
+
+            distance: Infinity,
+
+            path: []
+
+        };
+
+    }
+
 
     let current =
         target;
@@ -1162,6 +1406,7 @@ function dijkstra(
         path.unshift(
             current
         );
+
 
         current =
             previous[current];
@@ -1191,7 +1436,9 @@ function findNearestLocation(
     lng
 ) {
 
-    let nearestIndex = 0;
+    let nearestIndex =
+        -1;
+
 
     let nearestDistance =
         Infinity;
@@ -1217,6 +1464,7 @@ function findNearestLocation(
                 nearestDistance =
                     distance;
 
+
                 nearestIndex =
                     index;
 
@@ -1240,7 +1488,9 @@ function calculateDijkstraPath(
 ) {
 
     if (!currentPosition) {
+
         return null;
+
     }
 
 
@@ -1248,12 +1498,31 @@ function calculateDijkstraPath(
         createCampusGraph();
 
 
+    /*
+       Convert the actual GPS position
+       to the nearest campus graph vertex.
+    */
+
     const startIndex =
         findNearestLocation(
             currentPosition.lat,
             currentPosition.lng
         );
 
+
+    if (
+        startIndex === -1
+    ) {
+
+        return null;
+
+    }
+
+
+    /*
+       Find the destination's
+       graph vertex.
+    */
 
     const destinationIndex =
         locations.indexOf(
@@ -1270,6 +1539,10 @@ function calculateDijkstraPath(
     }
 
 
+    /*
+       Run Dijkstra.
+    */
+
     const result =
         dijkstra(
             graph,
@@ -1278,7 +1551,18 @@ function calculateDijkstraPath(
         );
 
 
-    return result;
+    return {
+
+        startIndex:
+            startIndex,
+
+        destinationIndex:
+            destinationIndex,
+
+        result:
+            result
+
+    };
 
 }
 
@@ -1298,8 +1582,10 @@ function isValidRouteCoordinate(point) {
 
     }
 
+
     const lat =
         Number(point[0]);
+
 
     const lng =
         Number(point[1]);
@@ -1350,12 +1636,33 @@ async function calculateRoute(
 
     }
 
-    if (!destination) return;
 
-    if (isRouting) return;
+    if (!destination) {
+
+        return;
+
+    }
+
+
+    if (isRouting) {
+
+        return;
+
+    }
 
 
     isRouting = true;
+
+
+    /*
+       Every route request receives a unique ID.
+
+       This prevents an old response from
+       replacing a newer route.
+    */
+
+    const thisRequestId =
+        ++routeRequestId;
 
 
     updateRoutePanel(
@@ -1367,48 +1674,94 @@ async function calculateRoute(
     const startLat =
         currentPosition.lat;
 
+
     const startLng =
         currentPosition.lng;
 
+
     const endLat =
         destination.lat;
+
 
     const endLng =
         destination.lng;
 
 
-    /*
-       =====================================================
+    /* =====================================================
        DIJKSTRA ADSA
-       =====================================================
+       ===================================================== */
 
-       Dijkstra is executed as the project's
-       graph shortest-path algorithm.
-
-       The result is kept internally for
-       ADSA implementation and demonstration.
-    */
-
-    const dijkstraResult =
+    const dijkstraData =
         calculateDijkstraPath(
             destination
         );
 
 
-    console.log(
-        "ADSA Dijkstra shortest path:",
-        dijkstraResult
-    );
+    if (dijkstraData) {
+
+        console.log(
+            "========== ADSA DIJKSTRA =========="
+        );
+
+
+        console.log(
+            "Nearest start node:",
+            locations[
+                dijkstraData.startIndex
+            ].name
+        );
+
+
+        console.log(
+            "Destination node:",
+            locations[
+                dijkstraData.destinationIndex
+            ].name
+        );
+
+
+        console.log(
+            "Dijkstra distance:",
+            dijkstraData.result.distance,
+            "meters"
+        );
+
+
+        console.log(
+            "Dijkstra path:",
+            dijkstraData.result.path.map(
+                function (index) {
+
+                    return locations[index].name;
+
+                }
+            )
+        );
+
+
+        console.log(
+            "==================================="
+        );
+
+    }
 
 
     /*
-       =====================================================
-       PEDESTRIAN ROUTING
-       =====================================================
+       IMPORTANT:
 
-       Valhalla is used only to obtain the
-       real pedestrian road/path geometry.
+       Dijkstra is our ADSA graph implementation.
+
+       Valhalla is used below for the actual
+       pedestrian-road geometry.
+
+       Therefore the blue route displayed
+       on the map follows real walking paths.
     */
+
+
+    /* =====================================================
+       VALHALLA PEDESTRIAN ROUTING REQUEST
+       ===================================================== */
 
     const requestBody = {
 
@@ -1472,6 +1825,20 @@ async function calculateRoute(
             );
 
 
+        /*
+           Check whether a newer route
+           request has already started.
+        */
+
+        if (
+            thisRequestId !== routeRequestId
+        ) {
+
+            return;
+
+        }
+
+
         if (!response.ok) {
 
             throw new Error(
@@ -1484,6 +1851,20 @@ async function calculateRoute(
 
         const data =
             await response.json();
+
+
+        /*
+           Again check whether this is
+           still the newest request.
+        */
+
+        if (
+            thisRequestId !== routeRequestId
+        ) {
+
+            return;
+
+        }
 
 
         if (
@@ -1512,26 +1893,15 @@ async function calculateRoute(
         }
 
 
-        /*
-           =================================================
+        /* =================================================
            DECODE VALHALLA POLYLINE6
-           =================================================
-        */
+           ================================================= */
 
         const coordinates =
             decodePolyline6(
                 leg.shape
             );
 
-
-        /*
-           IMPORTANT SAFETY CHECK
-
-           If invalid coordinates are received,
-           do NOT call fitBounds().
-           This prevents the map from zooming
-           to the entire world.
-        */
 
         if (
             !coordinates ||
@@ -1544,6 +1914,10 @@ async function calculateRoute(
 
         }
 
+
+        /*
+           Remove invalid coordinates.
+        */
 
         const validCoordinates =
             coordinates.filter(
@@ -1562,20 +1936,16 @@ async function calculateRoute(
         }
 
 
-        /*
-           =================================================
+        /* =================================================
            CLEAR OLD ROUTE
-           =================================================
-        */
+           ================================================= */
 
         clearRouteLayers();
 
 
-        /*
-           =================================================
-           MAIN WALKING ROUTE
-           =================================================
-        */
+        /* =================================================
+           DRAW MAIN WALKING ROUTE
+           ================================================= */
 
         routeLine =
             L.polyline(
@@ -1597,11 +1967,9 @@ async function calculateRoute(
             .addTo(map);
 
 
-        /*
-           =================================================
-           CONNECT EXACT GPS POSITION TO WALKING ROUTE
-           =================================================
-        */
+        /* =================================================
+           CONNECT GPS POSITION TO ROAD
+           ================================================= */
 
         const exactUserPoint =
             L.latLng(
@@ -1643,11 +2011,9 @@ async function calculateRoute(
             .addTo(map);
 
 
-        /*
-           =================================================
+        /* =================================================
            DESTINATION MARKER
-           =================================================
-        */
+           ================================================= */
 
         if (destinationMarker) {
 
@@ -1671,11 +2037,9 @@ async function calculateRoute(
             );
 
 
-        /*
-           =================================================
+        /* =================================================
            DISTANCE
-           =================================================
-        */
+           ================================================= */
 
         const distanceKm =
             Number(
@@ -1721,16 +2085,25 @@ async function calculateRoute(
         }
 
 
-        /*
-           =================================================
+        /* =================================================
            WALKING TIME
-           =================================================
-        */
+           ================================================= */
 
         const durationSeconds =
             Number(
                 data.trip.summary.time
             );
+
+
+        if (
+            !Number.isFinite(durationSeconds)
+        ) {
+
+            throw new Error(
+                "Invalid route duration"
+            );
+
+        }
 
 
         const durationMinutes =
@@ -1761,6 +2134,7 @@ async function calculateRoute(
                     durationMinutes / 60
                 );
 
+
             const minutes =
                 durationMinutes % 60;
 
@@ -1774,11 +2148,9 @@ async function calculateRoute(
         }
 
 
-        /*
-           =================================================
+        /* =================================================
            ROUTE PANEL
-           =================================================
-        */
+           ================================================= */
 
         updateRoutePanel(
             destination,
@@ -1814,15 +2186,17 @@ async function calculateRoute(
         }
 
 
-        /*
-           =================================================
+        /* =================================================
            MAP VIEW
-           =================================================
-        */
+           ================================================= */
 
         const bounds =
             L.latLngBounds([]);
 
+
+        /*
+           Include exact GPS position.
+        */
 
         bounds.extend(
             [
@@ -1832,6 +2206,10 @@ async function calculateRoute(
         );
 
 
+        /*
+           Include destination.
+        */
+
         bounds.extend(
             [
                 endLat,
@@ -1839,6 +2217,11 @@ async function calculateRoute(
             ]
         );
 
+
+        /*
+           Include every point of the
+           actual walking route.
+        */
 
         validCoordinates.forEach(
             function (point) {
@@ -1850,10 +2233,6 @@ async function calculateRoute(
             }
         );
 
-
-        /*
-           Fit only to valid route coordinates.
-        */
 
         if (
             bounds.isValid()
@@ -1874,6 +2253,10 @@ async function calculateRoute(
         }
 
 
+        /* =================================================
+           SHOW ROUTE PANEL
+           ================================================= */
+
         const panel =
             document.getElementById(
                 "routePanel"
@@ -1889,7 +2272,22 @@ async function calculateRoute(
         }
 
 
-        isRouting = false;
+        /*
+           Save the GPS position from which
+           this route was calculated.
+
+           Future GPS readings will be compared
+           against this position.
+        */
+
+        lastRoutedPosition = {
+
+            lat: startLat,
+
+            lng: startLng
+
+        };
+
 
     }
 
@@ -1902,9 +2300,17 @@ async function calculateRoute(
 
 
         /*
-           Remove any invalid/old route
-           instead of showing a wrong world map.
+           Ignore stale request errors.
         */
+
+        if (
+            thisRequestId !== routeRequestId
+        ) {
+
+            return;
+
+        }
+
 
         clearRouteLayers();
 
@@ -1942,8 +2348,22 @@ async function calculateRoute(
 
         }
 
+    }
 
-        isRouting = false;
+    finally {
+
+        /*
+           Only release the routing lock
+           for the current request.
+        */
+
+        if (
+            thisRequestId === routeRequestId
+        ) {
+
+            isRouting = false;
+
+        }
 
     }
 
@@ -1978,9 +2398,9 @@ function decodePolyline6(
         let byte;
 
 
-        /*
+        /* -----------------------------------------------
            Decode latitude
-        */
+           ----------------------------------------------- */
 
         do {
 
@@ -2016,9 +2436,9 @@ function decodePolyline6(
             deltaLat;
 
 
-        /*
+        /* -----------------------------------------------
            Decode longitude
-        */
+           ----------------------------------------------- */
 
         result = 0;
 
@@ -2060,7 +2480,7 @@ function decodePolyline6(
 
 
         /*
-           Valhalla uses polyline precision 6.
+           Valhalla polyline precision = 6.
         */
 
         coordinates.push(
@@ -2168,6 +2588,16 @@ function clearRouteLayers() {
 
 function clearRoute() {
 
+    /*
+       Invalidate all previous route requests.
+    */
+
+    routeRequestId++;
+
+
+    isRouting = false;
+
+
     clearRouteLayers();
 
 
@@ -2183,6 +2613,10 @@ function clearRoute() {
 
 
     selectedDestination =
+        null;
+
+
+    lastRoutedPosition =
         null;
 
 
