@@ -1,6 +1,6 @@
 /* =========================================================
    VISHNU SOCIETY NAVIGATION
-   GPS + WALKING NAVIGATION + DIJKSTRA ADSA
+   CAMPUS GPS + CAMPUS-ONLY DIJKSTRA NAVIGATION
    ========================================================= */
 
 
@@ -8,7 +8,7 @@
    GLOBAL VARIABLES
    ========================================================= */
 
-let map = null;
+let map;
 
 let userMarker = null;
 let accuracyCircle = null;
@@ -33,33 +33,16 @@ let lastRoutedPosition = null;
 
 /*
    User must move at least this much before
-   another walking route is requested.
+   the route is recalculated.
 */
-const REROUTE_DISTANCE_METERS = 15;
+const REROUTE_DISTANCE_METERS = 20;
 
 
 /*
-   GPS readings with extremely poor accuracy
-   are not used for automatic rerouting.
+   Very poor GPS readings are ignored for
+   route recalculation.
 */
 const MAX_ACCEPTABLE_GPS_ACCURACY = 100;
-
-
-/*
-   Maximum distance used to connect two
-   campus locations in the ADSA graph.
-*/
-const MAX_CONNECTION_DISTANCE = 450;
-
-
-/*
-   Maximum number of meters used when displaying
-   the GPS accuracy circle.
-
-   This prevents an enormous circle from covering
-   the whole map when GPS accuracy becomes poor.
-*/
-const MAX_DISPLAY_ACCURACY_CIRCLE = 80;
 
 
 /* =========================================================
@@ -216,6 +199,154 @@ const locations = [
 
 
 /* =========================================================
+   CAMPUS BOUNDARY
+   =========================================================
+
+   This is used as a safety boundary.
+
+   The route is not allowed to use locations
+   outside this campus area.
+
+   IMPORTANT:
+   These coordinates define the working
+   campus area used by this project.
+   ========================================================= */
+
+const CAMPUS_BOUNDARY = [
+
+    [16.5698, 81.5198],
+
+    [16.5698, 81.5262],
+
+    [16.5624, 81.5262],
+
+    [16.5624, 81.5198]
+
+];
+
+
+/* =========================================================
+   CAMPUS GRAPH CONNECTIONS
+   =========================================================
+
+   IMPORTANT:
+
+   We are NOT automatically connecting every
+   location based only on geographical distance.
+
+   Instead, we define campus connections.
+
+   This prevents Dijkstra from creating an
+   unrealistic connection through an outside road.
+
+   Each connection is an UNDIRECTED edge.
+
+   Example:
+
+   SVECW <-> Library
+
+   means:
+
+   SVECW -> Library
+   Library -> SVECW
+   ========================================================= */
+
+const CAMPUS_CONNECTIONS = [
+
+    ["SVECW", "Central Library"],
+    ["SVECW", "VIT"],
+    ["SVECW", "Food Courts"],
+    ["SVECW", "Girls Hostels"],
+
+    ["VIT", "Central Library"],
+    ["VIT", "Brewista"],
+    ["VIT", "BVR College"],
+    ["VIT", "Indian Bank & ATMs"],
+
+    ["Vishnu Dental", "Health Care"],
+    ["Vishnu Dental", "Central Library"],
+
+    ["SVCP", "Food Courts"],
+    ["SVCP", "Central Library"],
+    ["SVCP", "BVR College"],
+    ["SVCP", "Vishnu School Bhimavaram"],
+    ["SVCP", "VIT"],
+
+    ["BVR College", "Fitness Centre"],
+    ["BVR College", "SVCP"],
+    ["BVR College", "Brewista"],
+    ["BVR College", "Sports Complex"],
+    ["BVR College", "VIT"],
+
+    ["Smt. B. Seetha Polytechnic", "Indian Bank & ATMs"],
+    ["Smt. B. Seetha Polytechnic", "VIT"],
+    ["Smt. B. Seetha Polytechnic", "Boys Hostels"],
+    ["Smt. B. Seetha Polytechnic", "Girls Hostels"],
+    ["Smt. B. Seetha Polytechnic", "Brewista"],
+
+    ["Vishnu School Bhimavaram", "Food Courts"],
+    ["Vishnu School Bhimavaram", "SVCP"],
+    ["Vishnu School Bhimavaram", "Central Library"],
+
+    ["VEDIC Lake View", "Swimming Pool"],
+    ["VEDIC Lake View", "Fitness Centre"],
+    ["VEDIC Lake View", "Sports Complex"],
+    ["VEDIC Lake View", "BVR College"],
+
+    ["Boys Hostels", "Girls Hostels"],
+    ["Boys Hostels", "Indian Bank & ATMs"],
+    ["Boys Hostels", "Smt. B. Seetha Polytechnic"],
+    ["Boys Hostels", "SVECW"],
+
+    ["Girls Hostels", "Indian Bank & ATMs"],
+    ["Girls Hostels", "SVECW"],
+    ["Girls Hostels", "Smt. B. Seetha Polytechnic"],
+
+    ["Sports Complex", "Fitness Centre"],
+    ["Sports Complex", "BVR College"],
+    ["Sports Complex", "Swimming Pool"],
+    ["Sports Complex", "SVCP"],
+
+    ["Food Courts", "SVCP"],
+    ["Food Courts", "Vishnu School Bhimavaram"],
+    ["Food Courts", "Central Library"],
+    ["Food Courts", "SVECW"],
+    ["Food Courts", "BVR College"],
+
+    ["Fitness Centre", "BVR College"],
+    ["Fitness Centre", "Swimming Pool"],
+    ["Fitness Centre", "Sports Complex"],
+    ["Fitness Centre", "Brewista"],
+
+    ["Swimming Pool", "Fitness Centre"],
+    ["Swimming Pool", "VEDIC Lake View"],
+    ["Swimming Pool", "Sports Complex"],
+    ["Swimming Pool", "BVR College"],
+
+    ["Central Library", "SVECW"],
+    ["Central Library", "SVCP"],
+    ["Central Library", "Food Courts"],
+    ["Central Library", "VIT"],
+    ["Central Library", "Vishnu Dental"],
+
+    ["Indian Bank & ATMs", "Smt. B. Seetha Polytechnic"],
+    ["Indian Bank & ATMs", "Boys Hostels"],
+    ["Indian Bank & ATMs", "Girls Hostels"],
+    ["Indian Bank & ATMs", "VIT"],
+
+    ["Health Care", "Vishnu Dental"],
+    ["Health Care", "Central Library"],
+
+    ["Brewista", "VIT"],
+    ["Brewista", "BVR College"],
+    ["Brewista", "Fitness Centre"],
+    ["Brewista", "SVCP"],
+    ["Brewista", "Smt. B. Seetha Polytechnic"]
+
+];
+
+
+/* =========================================================
    PAGE LOAD
    ========================================================= */
 
@@ -270,10 +401,7 @@ function initializeMap() {
                 zoomControl: true
             }
         ).setView(
-            [
-                16.5672,
-                81.5225
-            ],
+            [16.5672, 81.5225],
             16
         );
 
@@ -661,9 +789,7 @@ function startGPS() {
    HANDLE GPS POSITION
    ========================================================= */
 
-function handlePosition(
-    position
-) {
+function handlePosition(position) {
 
     const lat =
         position.coords.latitude;
@@ -688,10 +814,6 @@ function handlePosition(
     }
 
 
-    const previousPosition =
-        currentPosition;
-
-
     currentPosition = {
 
         lat: lat,
@@ -714,7 +836,7 @@ function handlePosition(
 
 
     /* =====================================================
-       USER LOCATION MARKER
+       USER MARKER
        ===================================================== */
 
     if (!userMarker) {
@@ -761,20 +883,8 @@ function handlePosition(
 
 
     /* =====================================================
-       GPS ACCURACY CIRCLE
+       ACCURACY CIRCLE
        ===================================================== */
-
-    /*
-       Do not allow a very inaccurate GPS reading
-       to create a giant circle on the map.
-    */
-
-    const displayedAccuracy =
-        Math.min(
-            accuracy,
-            MAX_DISPLAY_ACCURACY_CIRCLE
-        );
-
 
     if (!accuracyCircle) {
 
@@ -783,8 +893,7 @@ function handlePosition(
                 userLatLng,
                 {
 
-                    radius:
-                        displayedAccuracy,
+                    radius: accuracy,
 
                     color: "#2563eb",
 
@@ -792,7 +901,7 @@ function handlePosition(
 
                     fillColor: "#3b82f6",
 
-                    fillOpacity: 0.08
+                    fillOpacity: 0.10
 
                 }
             )
@@ -807,23 +916,19 @@ function handlePosition(
 
 
         accuracyCircle.setRadius(
-            displayedAccuracy
+            accuracy
         );
 
     }
 
 
-    /* =====================================================
-       GPS STATUS
-       ===================================================== */
-
     if (
-        accuracy <=
+        accuracy >
         MAX_ACCEPTABLE_GPS_ACCURACY
     ) {
 
         updateGPSStatus(
-            "Navigation active • GPS accuracy ± " +
+            "GPS signal weak • accuracy ± " +
             Math.round(accuracy) +
             " m"
         );
@@ -832,7 +937,7 @@ function handlePosition(
     else {
 
         updateGPSStatus(
-            "GPS signal weak • accuracy ± " +
+            "Navigation active • GPS accuracy ± " +
             Math.round(accuracy) +
             " m"
         );
@@ -849,7 +954,7 @@ function handlePosition(
     if (status) {
 
         status.textContent =
-            "Your GPS location is active. Choose a destination to navigate.";
+            "Your exact GPS location is active. Choose a destination to navigate.";
 
     }
 
@@ -864,58 +969,36 @@ function handlePosition(
         accuracy <= MAX_ACCEPTABLE_GPS_ACCURACY
     ) {
 
-        /*
-           First route.
-        */
-
         if (!lastRoutedPosition) {
 
             calculateRoute(
                 selectedDestination
             );
 
-        }
-
-        /*
-           Later routes only after
-           meaningful movement.
-        */
-
-        else {
-
-            const movement =
-                haversineDistance(
-                    lastRoutedPosition.lat,
-                    lastRoutedPosition.lng,
-                    lat,
-                    lng
-                );
-
-
-            if (
-                movement >=
-                REROUTE_DISTANCE_METERS
-            ) {
-
-                calculateRoute(
-                    selectedDestination
-                );
-
-            }
+            return;
 
         }
 
-    }
+
+        const movement =
+            haversineDistance(
+                lastRoutedPosition.lat,
+                lastRoutedPosition.lng,
+                lat,
+                lng
+            );
 
 
-    /*
-       Keep previousPosition available
-       for future GPS improvements.
-    */
+        if (
+            movement >=
+            REROUTE_DISTANCE_METERS
+        ) {
 
-    if (previousPosition) {
+            calculateRoute(
+                selectedDestination
+            );
 
-        // Previous position intentionally retained.
+        }
 
     }
 
@@ -926,9 +1009,7 @@ function handlePosition(
    GPS ERROR
    ========================================================= */
 
-function handleGPSError(
-    error
-) {
+function handleGPSError(error) {
 
     let message =
         "Unable to get your location.";
@@ -967,9 +1048,7 @@ function handleGPSError(
    GPS STATUS
    ========================================================= */
 
-function updateGPSStatus(
-    message
-) {
+function updateGPSStatus(message) {
 
     const gps =
         document.getElementById(
@@ -1017,11 +1096,6 @@ function locateMe() {
 
         function (position) {
 
-            /*
-               Force this reading to become
-               the current GPS position.
-            */
-
             handlePosition(
                 position
             );
@@ -1036,10 +1110,7 @@ function locateMe() {
 
 
             map.setView(
-                [
-                    lat,
-                    lng
-                ],
+                [lat, lng],
                 19,
                 {
                     animate: true
@@ -1051,7 +1122,7 @@ function locateMe() {
 
                 userMarker
                     .bindPopup(
-                        "<b>📍 Your current GPS location</b>"
+                        "<b>📍 Your exact current location</b>"
                     )
                     .openPopup();
 
@@ -1060,12 +1131,8 @@ function locateMe() {
 
             if (selectedDestination) {
 
-                /*
-                   Explicit My Location request
-                   should create a fresh route.
-                */
-
-                lastRoutedPosition = null;
+                lastRoutedPosition =
+                    null;
 
 
                 calculateRoute(
@@ -1085,7 +1152,7 @@ function locateMe() {
 
             alert(
                 "Could not find your location.\n\n" +
-                "Please allow location permission and try again."
+                "Please allow location permission for this website and try again."
             );
 
         },
@@ -1109,9 +1176,7 @@ function locateMe() {
    NAVIGATE TO LOCATION
    ========================================================= */
 
-function navigateToLocation(
-    index
-) {
+function navigateToLocation(index) {
 
     const destination =
         locations[index];
@@ -1128,16 +1193,12 @@ function navigateToLocation(
     }
 
 
-    /*
-       Save destination.
-    */
-
     selectedDestination =
         destination;
 
 
     /*
-       New destination = new route.
+       New destination means a new route.
     */
 
     lastRoutedPosition =
@@ -1148,10 +1209,6 @@ function navigateToLocation(
         index
     );
 
-
-    /*
-       Scroll to map.
-    */
 
     const mapSection =
         document.getElementById(
@@ -1169,11 +1226,6 @@ function navigateToLocation(
 
     }
 
-
-    /*
-       If GPS already exists,
-       calculate immediately.
-    */
 
     if (currentPosition) {
 
@@ -1207,62 +1259,36 @@ function haversineDistance(
 
 
     const dLat =
-        (
-            lat2 - lat1
-        ) *
-        Math.PI /
-        180;
+        (lat2 - lat1) *
+        Math.PI / 180;
 
 
     const dLng =
-        (
-            lng2 - lng1
-        ) *
-        Math.PI /
-        180;
+        (lng2 - lng1) *
+        Math.PI / 180;
 
 
     const a =
-        Math.sin(
-            dLat / 2
-        ) *
-        Math.sin(
-            dLat / 2
-        )
-
-        +
+        Math.sin(dLat / 2) *
+        Math.sin(dLat / 2) +
 
         Math.cos(
-            lat1 *
-            Math.PI /
-            180
-        )
-
-        *
+            lat1 * Math.PI / 180
+        ) *
 
         Math.cos(
-            lat2 *
-            Math.PI /
-            180
-        )
-
-        *
-
-        Math.sin(
-            dLng / 2
+            lat2 * Math.PI / 180
         ) *
-        Math.sin(
-            dLng / 2
-        );
+
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
 
 
     const c =
         2 *
         Math.atan2(
             Math.sqrt(a),
-            Math.sqrt(
-                1 - a
-            )
+            Math.sqrt(1 - a)
         );
 
 
@@ -1272,28 +1298,16 @@ function haversineDistance(
 
 
 /* =========================================================
-   CREATE CAMPUS GRAPH
-   =========================================================
-
-   ADSA:
-
-   Vertex = campus location
-
-   Edge = connection between two locations
-
-   Weight = geographical distance
-
-   Graph = UNDIRECTED WEIGHTED GRAPH
+   CAMPUS GRAPH
    ========================================================= */
 
 function createCampusGraph() {
 
-    const graph =
-        [];
+    const graph = [];
 
 
     /*
-       Create adjacency list.
+       Create empty adjacency list.
     */
 
     for (
@@ -1308,73 +1322,95 @@ function createCampusGraph() {
 
 
     /*
-       Compare every pair of locations.
+       Convert location names into
+       graph connections.
     */
 
-    for (
-        let i = 0;
-        i < locations.length;
-        i++
-    ) {
+    CAMPUS_CONNECTIONS.forEach(
+        function (connection) {
 
-        for (
-            let j = i + 1;
-            j < locations.length;
-            j++
-        ) {
+            const nameA =
+                connection[0];
+
+
+            const nameB =
+                connection[1];
+
+
+            const indexA =
+                locations.findIndex(
+                    function (location) {
+
+                        return (
+                            location.name ===
+                            nameA
+                        );
+
+                    }
+                );
+
+
+            const indexB =
+                locations.findIndex(
+                    function (location) {
+
+                        return (
+                            location.name ===
+                            nameB
+                        );
+
+                    }
+                );
+
+
+            if (
+                indexA === -1 ||
+                indexB === -1
+            ) {
+
+                return;
+
+            }
+
 
             const distance =
                 haversineDistance(
-                    locations[i].lat,
-                    locations[i].lng,
-                    locations[j].lat,
-                    locations[j].lng
+                    locations[indexA].lat,
+                    locations[indexA].lng,
+                    locations[indexB].lat,
+                    locations[indexB].lng
                 );
 
 
             /*
-               Create an edge only when
-               locations are reasonably close.
+               A -> B
             */
 
-            if (
-                distance <=
-                MAX_CONNECTION_DISTANCE
-            ) {
+            graph[indexA].push({
 
-                /*
-                   i -> j
-                */
+                node: indexB,
 
-                graph[i].push({
+                weight: distance
 
-                    node: j,
-
-                    weight: distance
-
-                });
+            });
 
 
-                /*
-                   j -> i
+            /*
+               B -> A
 
-                   Therefore the graph
-                   is undirected.
-                */
+               This makes the graph UNDIRECTED.
+            */
 
-                graph[j].push({
+            graph[indexB].push({
 
-                    node: i,
+                node: indexA,
 
-                    weight: distance
+                weight: distance
 
-                });
-
-            }
+            });
 
         }
-
-    }
+    );
 
 
     return graph;
@@ -1383,7 +1419,7 @@ function createCampusGraph() {
 
 
 /* =========================================================
-   DIJKSTRA ALGORITHM
+   DIJKSTRA SHORTEST PATH
    ========================================================= */
 
 function dijkstra(
@@ -1416,17 +1452,9 @@ function dijkstra(
         );
 
 
-    /*
-       Starting node distance = 0.
-    */
-
     distances[start] =
         0;
 
-
-    /*
-       Repeat V times.
-    */
 
     for (
         let count = 0;
@@ -1443,8 +1471,8 @@ function dijkstra(
 
 
         /*
-           Find the unvisited node
-           with minimum distance.
+           Find the unvisited vertex
+           with the smallest distance.
         */
 
         for (
@@ -1471,10 +1499,6 @@ function dijkstra(
         }
 
 
-        /*
-           No reachable node.
-        */
-
         if (
             current === -1
         ) {
@@ -1483,10 +1507,6 @@ function dijkstra(
 
         }
 
-
-        /*
-           Destination reached.
-        */
 
         if (
             current === target
@@ -1544,11 +1564,9 @@ function dijkstra(
 
         return {
 
-            distance:
-                Infinity,
+            distance: Infinity,
 
-            path:
-                []
+            path: []
 
         };
 
@@ -1613,10 +1631,7 @@ function findNearestLocation(
 
 
     locations.forEach(
-        function (
-            location,
-            index
-        ) {
+        function (location, index) {
 
             const distance =
                 haversineDistance(
@@ -1651,17 +1666,138 @@ function findNearestLocation(
 
 
 /* =========================================================
-   CALCULATE DIJKSTRA PATH
+   POINT INSIDE CAMPUS
+   ========================================================= */
+
+function isPointInsideCampus(
+    lat,
+    lng
+) {
+
+    let inside =
+        false;
+
+
+    for (
+        let i = 0,
+        j = CAMPUS_BOUNDARY.length - 1;
+
+        i < CAMPUS_BOUNDARY.length;
+
+        j = i++
+    ) {
+
+        const latI =
+            CAMPUS_BOUNDARY[i][0];
+
+
+        const lngI =
+            CAMPUS_BOUNDARY[i][1];
+
+
+        const latJ =
+            CAMPUS_BOUNDARY[j][0];
+
+
+        const lngJ =
+            CAMPUS_BOUNDARY[j][1];
+
+
+        const intersect =
+            (
+                (lngI > lng) !==
+                (lngJ > lng)
+            )
+            &&
+            (
+                lat <
+                (
+                    (latJ - latI) *
+                    (lng - lngI) /
+                    (lngJ - lngI) +
+                    latI
+                )
+            );
+
+
+        if (intersect) {
+
+            inside =
+                !inside;
+
+        }
+
+    }
+
+
+    return inside;
+
+}
+
+
+/* =========================================================
+   CHECK GRAPH PATH
+   ========================================================= */
+
+function validateCampusPath(
+    path
+) {
+
+    if (
+        !path ||
+        path.length < 1
+    ) {
+
+        return false;
+
+    }
+
+
+    for (
+        let i = 0;
+        i < path.length;
+        i++
+    ) {
+
+        const location =
+            locations[path[i]];
+
+
+        if (!location) {
+
+            return false;
+
+        }
+
+
+        if (
+            !isPointInsideCampus(
+                location.lat,
+                location.lng
+            )
+        ) {
+
+            return false;
+
+        }
+
+    }
+
+
+    return true;
+
+}
+
+
+/* =========================================================
+   CALCULATE CAMPUS DIJKSTRA
    ========================================================= */
 
 function calculateDijkstraPath(
     destination
 ) {
 
-    if (
-        !currentPosition ||
-        !destination
-    ) {
+    if (!currentPosition) {
 
         return null;
 
@@ -1671,13 +1807,6 @@ function calculateDijkstraPath(
     const graph =
         createCampusGraph();
 
-
-    /*
-       GPS position is not itself a campus vertex.
-
-       Therefore we use the nearest campus
-       location as the starting graph vertex.
-    */
 
     const startIndex =
         findNearestLocation(
@@ -1718,6 +1847,17 @@ function calculateDijkstraPath(
         );
 
 
+    if (
+        !validateCampusPath(
+            result.path
+        )
+    ) {
+
+        return null;
+
+    }
+
+
     return {
 
         startIndex:
@@ -1735,16 +1875,19 @@ function calculateDijkstraPath(
 
 
 /* =========================================================
-   VALID ROUTE COORDINATE
+   DRAW CAMPUS DIJKSTRA ROUTE
    ========================================================= */
 
-function isValidRouteCoordinate(
-    point
+function drawCampusRoute(
+    dijkstraData,
+    destination
 ) {
 
     if (
-        !Array.isArray(point) ||
-        point.length < 2
+        !dijkstraData ||
+        !dijkstraData.result ||
+        !dijkstraData.result.path ||
+        dijkstraData.result.path.length === 0
     ) {
 
         return false;
@@ -1752,38 +1895,396 @@ function isValidRouteCoordinate(
     }
 
 
-    const lat =
-        Number(
-            point[0]
+    const path =
+        dijkstraData.result.path;
+
+
+    const coordinates = [];
+
+
+    /*
+       Start from exact GPS position.
+    */
+
+    coordinates.push(
+        [
+            currentPosition.lat,
+            currentPosition.lng
+        ]
+    );
+
+
+    /*
+       Add every campus graph vertex
+       selected by Dijkstra.
+    */
+
+    path.forEach(
+        function (index) {
+
+            coordinates.push(
+                [
+                    locations[index].lat,
+                    locations[index].lng
+                ]
+            );
+
+        }
+    );
+
+
+    /*
+       Safety check.
+    */
+
+    for (
+        let i = 1;
+        i < coordinates.length;
+        i++
+    ) {
+
+        if (
+            !isPointInsideCampus(
+                coordinates[i][0],
+                coordinates[i][1]
+            )
+        ) {
+
+            console.error(
+                "Unsafe campus coordinate detected."
+            );
+
+            return false;
+
+        }
+
+    }
+
+
+    clearRouteLayers();
+
+
+    /*
+       Main campus route.
+    */
+
+    routeLine =
+        L.polyline(
+            coordinates,
+            {
+
+                color: "#2563eb",
+
+                weight: 7,
+
+                opacity: 0.92,
+
+                lineCap: "round",
+
+                lineJoin: "round"
+
+            }
+        )
+        .addTo(map);
+
+
+    /*
+       Exact GPS -> nearest campus node.
+    */
+
+    const nearestIndex =
+        dijkstraData.startIndex;
+
+
+    const nearestLocation =
+        locations[
+            nearestIndex
+        ];
+
+
+    connectorLine =
+        L.polyline(
+            [
+
+                [
+                    currentPosition.lat,
+                    currentPosition.lng
+                ],
+
+                [
+                    nearestLocation.lat,
+                    nearestLocation.lng
+                ]
+
+            ],
+            {
+
+                color: "#2563eb",
+
+                weight: 5,
+
+                opacity: 0.85,
+
+                dashArray: "6,8",
+
+                lineCap: "round"
+
+            }
+        )
+        .addTo(map);
+
+
+    /*
+       Destination marker.
+    */
+
+    if (destinationMarker) {
+
+        map.removeLayer(
+            destinationMarker
+        );
+
+    }
+
+
+    destinationMarker =
+        L.marker(
+            [
+                destination.lat,
+                destination.lng
+            ]
+        )
+        .addTo(map)
+        .bindPopup(
+            `<b>📍 ${destination.name}</b>`
         );
 
 
-    const lng =
-        Number(
-            point[1]
+    /*
+       Calculate distance.
+    */
+
+    let totalDistance =
+        haversineDistance(
+            currentPosition.lat,
+            currentPosition.lng,
+            nearestLocation.lat,
+            nearestLocation.lng
         );
 
 
+    totalDistance +=
+        dijkstraData.result.distance;
+
+
+    let distanceText;
+
+
     if (
-        !Number.isFinite(lat) ||
-        !Number.isFinite(lng)
+        totalDistance < 1000
     ) {
 
-        return false;
+        distanceText =
+            Math.round(
+                totalDistance
+            ) +
+            " m";
+
+    }
+    else {
+
+        distanceText =
+            (
+                totalDistance / 1000
+            ).toFixed(2) +
+            " km";
 
     }
 
 
+    /*
+       Estimate walking time.
+
+       5.1 km/h = approximately
+       1.416 m/s.
+    */
+
+    const walkingSpeed =
+        5.1 * 1000 / 3600;
+
+
+    const walkingSeconds =
+        totalDistance /
+        walkingSpeed;
+
+
+    const walkingMinutes =
+        Math.max(
+            1,
+            Math.ceil(
+                walkingSeconds / 60
+            )
+        );
+
+
+    let timeText;
+
+
     if (
-        lat < -90 ||
-        lat > 90 ||
-        lng < -180 ||
-        lng > 180
+        walkingMinutes < 60
     ) {
 
-        return false;
+        timeText =
+            walkingMinutes +
+            " min";
 
     }
+    else {
+
+        const hours =
+            Math.floor(
+                walkingMinutes / 60
+            );
+
+
+        const minutes =
+            walkingMinutes % 60;
+
+
+        timeText =
+            hours +
+            " hr " +
+            minutes +
+            " min";
+
+    }
+
+
+    /*
+       Update route panel.
+    */
+
+    updateRoutePanel(
+        destination,
+        "🚶 On Foot • Campus shortest path"
+    );
+
+
+    const distanceElement =
+        document.getElementById(
+            "routeDistance"
+        );
+
+
+    const timeElement =
+        document.getElementById(
+            "routeTime"
+        );
+
+
+    if (distanceElement) {
+
+        distanceElement.textContent =
+            distanceText;
+
+    }
+
+
+    if (timeElement) {
+
+        timeElement.textContent =
+            timeText;
+
+    }
+
+
+    /*
+       Fit map to route.
+    */
+
+    const bounds =
+        L.latLngBounds([]);
+
+
+    coordinates.forEach(
+        function (point) {
+
+            bounds.extend(
+                point
+            );
+
+        }
+    );
+
+
+    if (
+        bounds.isValid()
+    ) {
+
+        map.fitBounds(
+            bounds,
+            {
+
+                padding: [
+                    80,
+                    80
+                ],
+
+                maxZoom: 18
+
+            }
+        );
+
+    }
+
+
+    /*
+       Log ADSA result.
+    */
+
+    console.log(
+        "========== CAMPUS DIJKSTRA =========="
+    );
+
+
+    console.log(
+        "Start:",
+        locations[
+            dijkstraData.startIndex
+        ].name
+    );
+
+
+    console.log(
+        "Destination:",
+        destination.name
+    );
+
+
+    console.log(
+        "Shortest campus distance:",
+        Math.round(
+            dijkstraData.result.distance
+        ),
+        "meters"
+    );
+
+
+    console.log(
+        "Campus path:",
+        dijkstraData.result.path.map(
+            function (index) {
+
+                return locations[index].name;
+
+            }
+        )
+    );
+
+
+    console.log(
+        "======================================"
+    );
 
 
     return true;
@@ -1792,27 +2293,30 @@ function isValidRouteCoordinate(
 
 
 /* =========================================================
-   WALKING ROUTE
+   MAIN ROUTE CALCULATION
    ========================================================= */
 
 async function calculateRoute(
     destination
 ) {
 
-    if (
-        !currentPosition ||
-        !destination
-    ) {
+    if (!currentPosition) {
+
+        updateGPSStatus(
+            "Waiting for exact GPS position..."
+        );
 
         return;
 
     }
 
 
-    /*
-       Prevent multiple simultaneous
-       route requests.
-    */
+    if (!destination) {
+
+        return;
+
+    }
+
 
     if (isRouting) {
 
@@ -1825,650 +2329,155 @@ async function calculateRoute(
         true;
 
 
-    /*
-       Unique request ID.
-
-       If another route request becomes
-       newer, this response is ignored.
-    */
-
     const thisRequestId =
         ++routeRequestId;
 
 
-    /*
-       Store the exact position used
-       for this route.
-    */
-
-    const startLat =
-        currentPosition.lat;
-
-
-    const startLng =
-        currentPosition.lng;
-
-
-    const endLat =
-        destination.lat;
-
-
-    const endLng =
-        destination.lng;
-
-
     updateRoutePanel(
         destination,
-        "🚶 On Foot • Finding walking route..."
+        "🚶 On Foot • Finding campus shortest path..."
     );
-
-
-    /* =====================================================
-       ADSA — DIJKSTRA
-       ===================================================== */
-
-    const dijkstraData =
-        calculateDijkstraPath(
-            destination
-        );
-
-
-    if (dijkstraData) {
-
-        console.log(
-            "========== ADSA DIJKSTRA =========="
-        );
-
-
-        console.log(
-            "Start node:",
-            locations[
-                dijkstraData.startIndex
-            ].name
-        );
-
-
-        console.log(
-            "Destination:",
-            locations[
-                dijkstraData.destinationIndex
-            ].name
-        );
-
-
-        console.log(
-            "Shortest graph distance:",
-            dijkstraData.result.distance,
-            "meters"
-        );
-
-
-        console.log(
-            "Dijkstra path:",
-            dijkstraData.result.path.map(
-                function (index) {
-
-                    return locations[
-                        index
-                    ].name;
-
-                }
-            )
-        );
-
-
-        console.log(
-            "==================================="
-        );
-
-    }
-
-
-    /* =====================================================
-       VALHALLA WALKING ROUTING
-       =====================================================
-
-       Valhalla gives the actual road/path geometry.
-
-       This is what is displayed on the map.
-       ===================================================== */
-
-    const requestBody = {
-
-        locations: [
-
-            {
-                lat:
-                    startLat,
-
-                lon:
-                    startLng
-
-            },
-
-            {
-                lat:
-                    endLat,
-
-                lon:
-                    endLng
-
-            }
-
-        ],
-
-
-        costing:
-            "pedestrian",
-
-
-        costing_options: {
-
-            pedestrian: {
-
-                walking_speed:
-                    5.1
-
-            }
-
-        },
-
-
-        directions_options: {
-
-            units:
-                "kilometers"
-
-        }
-
-    };
 
 
     try {
 
-        const response =
-            await fetch(
-                "https://valhalla1.openstreetmap.de/route",
-                {
-
-                    method:
-                        "POST",
-
-                    headers: {
-
-                        "Content-Type":
-                            "application/json"
-
-                    },
-
-                    body:
-                        JSON.stringify(
-                            requestBody
-                        )
-
-                }
-            );
-
-
         /*
-           Ignore old responses.
+           Check whether GPS position itself
+           is inside the campus area.
         */
 
-        if (
-            thisRequestId !==
-            routeRequestId
-        ) {
-
-            return;
-
-        }
-
-
-        if (
-            !response.ok
-        ) {
-
-            throw new Error(
-                "Valhalla server error: " +
-                response.status
-            );
-
-        }
-
-
-        const data =
-            await response.json();
-
-
-        /*
-           Ignore old response again.
-        */
-
-        if (
-            thisRequestId !==
-            routeRequestId
-        ) {
-
-            return;
-
-        }
-
-
-        if (
-            !data.trip ||
-            !data.trip.legs ||
-            data.trip.legs.length === 0
-        ) {
-
-            throw new Error(
-                "No walking route found."
-            );
-
-        }
-
-
-        const leg =
-            data.trip.legs[0];
-
-
-        if (
-            !leg.shape
-        ) {
-
-            throw new Error(
-                "No walking route geometry."
-            );
-
-        }
-
-
-        /* =================================================
-           DECODE POLYLINE6
-           ================================================= */
-
-        const coordinates =
-            decodePolyline6(
-                leg.shape
+        const userInsideCampus =
+            isPointInsideCampus(
+                currentPosition.lat,
+                currentPosition.lng
             );
 
 
-        const validCoordinates =
-            coordinates.filter(
-                isValidRouteCoordinate
+        if (!userInsideCampus) {
+
+            clearRouteLayers();
+
+
+            updateRoutePanel(
+                destination,
+                "📍 Your GPS position is outside the campus"
             );
 
 
-        if (
-            validCoordinates.length < 2
-        ) {
-
-            throw new Error(
-                "Invalid route coordinates."
-            );
-
-        }
-
-
-        /* =================================================
-           CLEAR PREVIOUS ROUTE
-           ================================================= */
-
-        clearRouteLayers();
-
-
-        /* =================================================
-           DRAW WALKING ROUTE
-           ================================================= */
-
-        routeLine =
-            L.polyline(
-                validCoordinates,
-                {
-
-                    color:
-                        "#2563eb",
-
-                    weight:
-                        7,
-
-                    opacity:
-                        0.90,
-
-                    lineCap:
-                        "round",
-
-                    lineJoin:
-                        "round"
-
-                }
-            )
-            .addTo(map);
-
-
-        /* =================================================
-           GPS TO ROAD CONNECTOR
-           ================================================= */
-
-        const roadStartPoint =
-            L.latLng(
-                validCoordinates[0][0],
-                validCoordinates[0][1]
-            );
-
-
-        const exactUserPoint =
-            L.latLng(
-                startLat,
-                startLng
-            );
-
-
-        /*
-           Only draw connector if GPS and road
-           starting point are meaningfully apart.
-        */
-
-        const connectorDistance =
-            haversineDistance(
-                startLat,
-                startLng,
-                validCoordinates[0][0],
-                validCoordinates[0][1]
-            );
-
-
-        if (
-            connectorDistance > 5
-        ) {
-
-            connectorLine =
-                L.polyline(
-                    [
-
-                        exactUserPoint,
-
-                        roadStartPoint
-
-                    ],
-                    {
-
-                        color:
-                            "#2563eb",
-
-                        weight:
-                            4,
-
-                        opacity:
-                            0.75,
-
-                        dashArray:
-                            "6,8",
-
-                        lineCap:
-                            "round"
-
-                    }
-                )
-                .addTo(map);
-
-        }
-
-
-        /* =================================================
-           DESTINATION MARKER
-           ================================================= */
-
-        if (destinationMarker) {
-
-            map.removeLayer(
-                destinationMarker
-            );
-
-        }
-
-
-        destinationMarker =
-            L.marker(
-                [
-                    endLat,
-                    endLng
-                ]
-            )
-            .addTo(map)
-            .bindPopup(
-                `<b>📍 ${destination.name}</b>`
-            );
-
-
-        /* =================================================
-           ROUTE DISTANCE
-           ================================================= */
-
-        const distanceKm =
-            Number(
-                data.trip.summary.length
-            );
-
-
-        if (
-            !Number.isFinite(
-                distanceKm
-            )
-        ) {
-
-            throw new Error(
-                "Invalid route distance."
-            );
-
-        }
-
-
-        const distanceMeters =
-            distanceKm * 1000;
-
-
-        let distanceText;
-
-
-        if (
-            distanceMeters < 1000
-        ) {
-
-            distanceText =
-                Math.round(
-                    distanceMeters
-                ) +
-                " m";
-
-        }
-        else {
-
-            distanceText =
-                distanceKm.toFixed(2) +
-                " km";
-
-        }
-
-
-        /* =================================================
-           WALKING TIME
-           ================================================= */
-
-        const durationSeconds =
-            Number(
-                data.trip.summary.time
-            );
-
-
-        if (
-            !Number.isFinite(
-                durationSeconds
-            )
-        ) {
-
-            throw new Error(
-                "Invalid route duration."
-            );
-
-        }
-
-
-        const durationMinutes =
-            Math.max(
-                1,
-                Math.ceil(
-                    durationSeconds / 60
-                )
-            );
-
-
-        let timeText;
-
-
-        if (
-            durationMinutes < 60
-        ) {
-
-            timeText =
-                durationMinutes +
-                " min";
-
-        }
-        else {
-
-            const hours =
-                Math.floor(
-                    durationMinutes / 60
+            const distanceElement =
+                document.getElementById(
+                    "routeDistance"
                 );
 
 
-            const minutes =
-                durationMinutes % 60;
-
-
-            timeText =
-                hours +
-                " hr " +
-                minutes +
-                " min";
-
-        }
-
-
-        /* =================================================
-           UPDATE ROUTE PANEL
-           ================================================= */
-
-        updateRoutePanel(
-            destination,
-            "🚶 On Foot • Walking route from your GPS position"
-        );
-
-
-        const distanceElement =
-            document.getElementById(
-                "routeDistance"
-            );
-
-
-        const timeElement =
-            document.getElementById(
-                "routeTime"
-            );
-
-
-        if (distanceElement) {
-
-            distanceElement.textContent =
-                distanceText;
-
-        }
-
-
-        if (timeElement) {
-
-            timeElement.textContent =
-                timeText;
-
-        }
-
-
-        /* =================================================
-           MAP VIEW
-           ================================================= */
-
-        const bounds =
-            L.latLngBounds([]);
-
-
-        bounds.extend(
-            [
-                startLat,
-                startLng
-            ]
-        );
-
-
-        bounds.extend(
-            [
-                endLat,
-                endLng
-            ]
-        );
-
-
-        validCoordinates.forEach(
-            function (point) {
-
-                bounds.extend(
-                    point
+            const timeElement =
+                document.getElementById(
+                    "routeTime"
                 );
+
+
+            if (distanceElement) {
+
+                distanceElement.textContent =
+                    "--";
 
             }
-        );
 
 
-        if (
-            bounds.isValid()
-        ) {
+            if (timeElement) {
 
-            map.fitBounds(
-                bounds,
-                {
+                timeElement.textContent =
+                    "--";
 
-                    padding:
-                        [
-                            70,
-                            70
-                        ],
+            }
 
-                    maxZoom:
-                        18
 
-                }
+            alert(
+                "Your current GPS position appears to be outside the Vishnu campus.\n\n" +
+                "Please enter the campus before starting campus navigation."
+            );
+
+
+            return;
+
+        }
+
+
+        /*
+           Calculate Dijkstra.
+        */
+
+        const dijkstraData =
+            calculateDijkstraPath(
+                destination
+            );
+
+
+        if (!dijkstraData) {
+
+            throw new Error(
+                "No safe campus path found."
             );
 
         }
 
 
-        /* =================================================
-           SAVE ROUTED POSITION
-           ================================================= */
+        /*
+           Make sure this request is
+           still the newest request.
+        */
+
+        if (
+            thisRequestId !==
+            routeRequestId
+        ) {
+
+            return;
+
+        }
+
+
+        /*
+           DRAW ONLY THE CAMPUS GRAPH ROUTE.
+
+           We intentionally do NOT send the
+           destination to Valhalla.
+
+           This prevents Valhalla from choosing
+           the highway/public road outside campus.
+        */
+
+        const success =
+            drawCampusRoute(
+                dijkstraData,
+                destination
+            );
+
+
+        if (!success) {
+
+            throw new Error(
+                "Campus route validation failed."
+            );
+
+        }
+
+
+        /*
+           Save position from which this
+           route was calculated.
+        */
 
         lastRoutedPosition = {
 
             lat:
-                startLat,
+                currentPosition.lat,
 
             lng:
-                startLng
+                currentPosition.lng
 
         };
 
-
-        /*
-           Show route panel.
-        */
 
         const panel =
             document.getElementById(
@@ -2489,14 +2498,10 @@ async function calculateRoute(
     catch (error) {
 
         console.error(
-            "WALKING ROUTE ERROR:",
+            "CAMPUS ROUTE ERROR:",
             error
         );
 
-
-        /*
-           Ignore stale errors.
-        */
 
         if (
             thisRequestId !==
@@ -2513,7 +2518,7 @@ async function calculateRoute(
 
         updateRoutePanel(
             destination,
-            "🚶 On Foot • Unable to find walking route"
+            "🚶 On Foot • Campus route unavailable"
         );
 
 
@@ -2548,11 +2553,6 @@ async function calculateRoute(
 
     finally {
 
-        /*
-           Unlock only if this is still
-           the latest request.
-        */
-
         if (
             thisRequestId ===
             routeRequestId
@@ -2564,160 +2564,6 @@ async function calculateRoute(
         }
 
     }
-
-}
-
-
-/* =========================================================
-   POLYLINE6 DECODER
-   ========================================================= */
-
-function decodePolyline6(
-    encoded
-) {
-
-    let index =
-        0;
-
-
-    let lat =
-        0;
-
-
-    let lng =
-        0;
-
-
-    const coordinates =
-        [];
-
-
-    while (
-        index <
-        encoded.length
-    ) {
-
-        let result =
-            0;
-
-
-        let shift =
-            0;
-
-
-        let byte;
-
-
-        /* -----------------------------------------------
-           LATITUDE
-           ----------------------------------------------- */
-
-        do {
-
-            byte =
-                encoded.charCodeAt(
-                    index++
-                ) -
-                63;
-
-
-            result |=
-                (byte & 0x1f) <<
-                shift;
-
-
-            shift +=
-                5;
-
-        }
-        while (
-            byte >= 0x20
-        );
-
-
-        const deltaLat =
-            (
-                result & 1
-            )
-                ?
-                ~(result >> 1)
-                :
-                (result >> 1);
-
-
-        lat +=
-            deltaLat;
-
-
-        /* -----------------------------------------------
-           LONGITUDE
-           ----------------------------------------------- */
-
-        result =
-            0;
-
-
-        shift =
-            0;
-
-
-        do {
-
-            byte =
-                encoded.charCodeAt(
-                    index++
-                ) -
-                63;
-
-
-            result |=
-                (byte & 0x1f) <<
-                shift;
-
-
-            shift +=
-                5;
-
-        }
-        while (
-            byte >= 0x20
-        );
-
-
-        const deltaLng =
-            (
-                result & 1
-            )
-                ?
-                ~(result >> 1)
-                :
-                (result >> 1);
-
-
-        lng +=
-            deltaLng;
-
-
-        /*
-           Valhalla uses precision 6.
-        */
-
-        coordinates.push(
-            [
-
-                lat /
-                    1000000,
-
-                lng /
-                    1000000
-
-            ]
-        );
-
-    }
-
-
-    return coordinates;
 
 }
 
@@ -2782,14 +2628,12 @@ function updateRoutePanel(
 
 function clearRouteLayers() {
 
-    if (
-        routeLine &&
-        map
-    ) {
+    if (routeLine) {
 
         map.removeLayer(
             routeLine
         );
+
 
         routeLine =
             null;
@@ -2797,14 +2641,12 @@ function clearRouteLayers() {
     }
 
 
-    if (
-        connectorLine &&
-        map
-    ) {
+    if (connectorLine) {
 
         map.removeLayer(
             connectorLine
         );
+
 
         connectorLine =
             null;
@@ -2821,8 +2663,7 @@ function clearRouteLayers() {
 function clearRoute() {
 
     /*
-       Invalidate all previous
-       route requests.
+       Invalidate old route requests.
     */
 
     routeRequestId++;
@@ -2835,10 +2676,7 @@ function clearRoute() {
     clearRouteLayers();
 
 
-    if (
-        destinationMarker &&
-        map
-    ) {
+    if (destinationMarker) {
 
         map.removeLayer(
             destinationMarker
@@ -2920,8 +2758,7 @@ function startNavigationFromHero() {
 
         mapSection.scrollIntoView(
             {
-                behavior:
-                    "smooth"
+                behavior: "smooth"
             }
         );
 
@@ -2949,8 +2786,7 @@ window.addEventListener(
     function () {
 
         if (
-            gpsWatchId !== null &&
-            navigator.geolocation
+            gpsWatchId !== null
         ) {
 
             navigator.geolocation.clearWatch(
